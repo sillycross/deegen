@@ -1,0 +1,11 @@
+__llvm__
+build/
+deegen.cflags
+deegen.config
+deegen.creator
+deegen.creator.user
+deegen.cxxflags
+deegen.files
+deegen.includes
+main
+shared_libs

@@ -124,7 +124,8 @@ include_directories("${PROJECT_SOURCE_DIR}/deegen")
 # add the executable
 #
 add_executable(main
-  main.cpp                 
+  main.cpp         
+  test_bytecode_metadata.cpp
 )
 
 target_link_libraries(main PUBLIC

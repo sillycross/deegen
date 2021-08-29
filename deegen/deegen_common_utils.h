@@ -8,4 +8,5 @@
 #include "get_mem_fn_address_helper.h"
 #include "function_ref.h"
 #include "reflective_stringify_helper.h"
+#include "constexpr_array_concat_helper.h"
 
