@@ -91,4 +91,20 @@ void* GetClassMethodPtr(MethPtr p)
     return fp.GetRawFunctionPointer();
 }
 
+// Same as above, except also works for plain pointers
+//
+template<typename MethPtr>
+void* GetClassMethodOrPlainFunctionPtr(MethPtr p)
+{
+    if constexpr(std::is_member_function_pointer_v<MethPtr>)
+    {
+        return GetClassMethodPtr(p);
+    }
+    else
+    {
+        static_assert(std::is_pointer_v<MethPtr>);
+        return reinterpret_cast<void*>(p);
+    }
+}
+
 }   // namespace deegen

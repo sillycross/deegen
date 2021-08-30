@@ -88,4 +88,52 @@ TEST(BytecodeMetadata, Sanity3)
     ReleaseAssert(md::mdArray[3].m_typeName == "deegen::BytecodeDest");
 }
 
+struct MyClass4
+{
+    using TE = deegen::TypeEnum;
+
+    template<TE te1, TE te2>
+    void f(deegen::Type<te1>* /*v1*/, deegen::Type<te2>* /*v2*/, int /*v3*/) const noexcept
+    { }
+
+    REGISTER_DISPATCHER(MyClass4, f, 2)
+
+    void g(deegen::BoxedValue a, deegen::BoxedValue b)
+    {
+        dispatch_to_f(a, b, 1);
+    }
+};
+
+struct MyClass4Checker
+{
+    template<size_t i1, size_t i2>
+    static void checker(const std::vector<void*>& o)
+    {
+        constexpr size_t numTypes = static_cast<size_t>(deegen::TypeEnum::X_END_OF_ENUM);
+        static_assert(i1 < numTypes && i2 < numTypes);
+        ReleaseAssert(o[i1 * numTypes + i2] ==
+                deegen::GetClassMethodPtr(
+                    &MyClass4::f<
+                        static_cast<deegen::TypeEnum>(i1),
+                        static_cast<deegen::TypeEnum>(i2)>));
+        if constexpr(i2 + 1 < numTypes)
+        {
+            checker<i1, i2 + 1>(o);
+        }
+        else if constexpr(i1 + 1 < numTypes)
+        {
+            checker<i1 + 1, 0>(o);
+        }
+    }
+};
+
+TEST(BytecodeMetadata, Sanity4)
+{
+    std::vector<void*> o;
+    MyClass4::__gen_voidstar_list_f(&o);
+    size_t numTypes = static_cast<size_t>(deegen::TypeEnum::X_END_OF_ENUM);
+    ReleaseAssert(o.size() == numTypes * numTypes);
+    MyClass4Checker::checker<0, 0>(o);
+}
+
 }   // namespace TestBytecodeMetadata

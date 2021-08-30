@@ -1,6 +1,7 @@
 #pragma once
 
 #include "deegen_common_utils.h"
+#include "user_type_definitions.h"
 
 namespace deegen
 {
@@ -259,5 +260,130 @@ struct BytecodeMetadataAccessor
     }
 
 #define END_FIELD_LIST() END_FIELD_LIST_IMPL_(__COUNTER__)
+
+// Macro REGISTER_DISPATCHER(class_name, method_name, template_param_count)
+// Register a type dispatcher templated member function
+// The templated function being registered must look like the following:
+//    template<TypeEnum... te_list>
+//    Ret method_name(Type<te_list>*... te_vals, Args... arg_vals)
+//
+// The macro generates another member function
+//    Ret dispatch_to_##method_name(BoxedValue... bv_vals, Args... arg_vals)
+//
+// The generated function has the following semantics:
+//    (1) bv_vals are unboxed to TypeEnum list 'te_list' and value list 'te_vals'
+//    (2) method_name<te_list> is invoked with parameter te_vals, arg_vals
+//
+#define REGISTER_DISPATCHER(classname, methodname, num_template_params)                             \
+    constexpr void __deegen_internal_assert_class_ ## methodname () {                               \
+        static_assert(std::is_same_v<std::remove_pointer_t<decltype(this)>, classname>,             \
+            "wrong classname '" #classname "' is provided to REGISTER_DISPATCHER macro");           \
+    }                                                                                               \
+                                                                                                    \
+    template<size_t __n, ::deegen::TypeEnum... __tes>                                               \
+    struct __gen_list_impl_ ## methodname                                                           \
+    {                                                                                               \
+        template<size_t __i>                                                                        \
+        constexpr static auto __exec()                                                              \
+        {                                                                                           \
+            if constexpr(sizeof...(__tes) == __n)                                                   \
+            {                                                                                       \
+                /* TODO: add static_assert to check that function shape is good */                  \
+                return std::make_tuple(& classname :: methodname <__tes...>);                       \
+            }                                                                                       \
+            else if constexpr(__i + 1 >= static_cast<size_t>(::deegen::TypeEnum::X_END_OF_ENUM))    \
+            {                                                                                       \
+                return __gen_list_impl_ ## methodname <                                             \
+                            __n, __tes..., static_cast<::deegen::TypeEnum>(__i)>::                  \
+                                template __exec<0>();                                               \
+            }                                                                                       \
+            else                                                                                    \
+            {                                                                                       \
+                return std::tuple_cat(                                                              \
+                    __gen_list_impl_ ## methodname <                                                \
+                            __n, __tes..., static_cast<::deegen::TypeEnum>(__i)>::                  \
+                                template __exec<0>(),                                               \
+                    __gen_list_impl_ ## methodname <__n, __tes...>::                                \
+                                template __exec<__i + 1>()                                          \
+                );                                                                                  \
+            }                                                                                       \
+        }                                                                                           \
+    };                                                                                              \
+                                                                                                    \
+    constexpr static auto __gen_list_ ## methodname()                                               \
+    {                                                                                               \
+        constexpr auto res = __gen_list_impl_ ## methodname < num_template_params >::__exec<0>();   \
+        return res;                                                                                 \
+    }                                                                                               \
+                                                                                                    \
+    static void __attribute__((__used__))                                                           \
+        __gen_voidstar_list_ ## methodname(std::vector<void*>* output /*out*/)                      \
+    {                                                                                               \
+        constexpr auto res = __gen_list_ ## methodname();                                           \
+        ::deegen::ConvertPointerTupleToVoidStarVector(res, output /*out*/);                         \
+    }                                                                                               \
+                                                                                                    \
+    template<int __N, ::deegen::TypeEnum... __S>                                                    \
+    struct __instantiate_helper : __instantiate_helper<                                             \
+        __N - 1, static_cast<::deegen::TypeEnum>(0), __S...> { };                                   \
+                                                                                                    \
+    template<::deegen::TypeEnum... __S>                                                             \
+    struct __instantiate_helper<0, __S...>                                                          \
+    {                                                                                               \
+        using type = decltype(&classname :: methodname <__S...>);                                   \
+    };                                                                                              \
+                                                                                                    \
+    using __function_type_ ## methodname =                                                          \
+        typename __instantiate_helper<num_template_params>::type;                                   \
+                                                                                                    \
+    static_assert(::deegen::is_member_function_const<__function_type_ ## methodname>::value,        \
+        "function '" #methodname "' provided to REGISTER_DISPATCHER must be const");                \
+    static_assert(::deegen::is_member_function_noexcept<__function_type_ ## methodname>::value,     \
+        "function '" #methodname "' provided to REGISTER_DISPATCHER must be noexcept");             \
+                                                                                                    \
+    using __return_type_ ## methodname =                                                            \
+        ::deegen::member_function_return_type_t <                                                   \
+            __function_type_ ## methodname >;                                                       \
+                                                                                                    \
+    template<typename __T> struct __deegen_internal_dispatch_ ## methodname;                        \
+                                                                                                    \
+    template<typename... __Args>                                                                    \
+    struct __deegen_internal_dispatch_ ## methodname<                                               \
+        __return_type_ ## methodname( classname ::* )(__Args...) const noexcept>                    \
+    {                                                                                               \
+        static_assert(std::is_same_v<                                                               \
+            __return_type_ ## methodname( classname ::* )(__Args...) const noexcept,                \
+            __function_type_ ## methodname>,                                                        \
+            "dispatch_" #methodname " is called with incompatible function parameters");            \
+                                                                                                    \
+        template<size_t __i>                                                                        \
+        using DispatcherArgType = std::conditional_t<                                               \
+            __i < num_template_params,                                                              \
+            ::deegen::BoxedValue,                                                                   \
+            std::tuple_element_t<__i, std::tuple<__Args...>>>;                                      \
+                                                                                                    \
+        template<int __N, int... __S>                                                               \
+        struct impl : impl<__N - 1, __N - 1, __S...> { };                                           \
+                                                                                                    \
+        template<int... __S>                                                                        \
+        struct impl<0, __S...>                                                                      \
+        {                                                                                           \
+            /* implementation intentionally not provided so we can identify it in LLVM IR */        \
+            static __return_type_ ## methodname __dispatcher_run__(                                 \
+                std::add_pointer_t< std::add_const_t< classname > >,                                \
+                DispatcherArgType<__S>...) noexcept;                                                \
+        };                                                                                          \
+                                                                                                    \
+        using impl_t = impl<sizeof...(__Args)>;                                                     \
+    };                                                                                              \
+                                                                                                    \
+    template<typename... __Args>                                                                    \
+    __return_type_ ## methodname __attribute__((__always_inline__))                                 \
+        dispatch_to_ ## methodname(__Args&&... __args) const noexcept                               \
+    {                                                                                               \
+        using __impl = typename __deegen_internal_dispatch_ ## methodname<                          \
+                    __function_type_ ## methodname>::impl_t;                                        \
+        __impl::__dispatcher_run__(this, std::forward<__Args>(__args)...);                          \
+    }
 
 }   // namespace deegen
